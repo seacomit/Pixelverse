@@ -1,0 +1,80 @@
+#pragma kernel Clear
+#pragma kernel Copy
+#pragma kernel Rotate
+
+// Represents the properties of a single point in the voxel structure.
+struct Voxel
+{
+    uint type;
+};
+
+// A buffer which represents a 3d voxel data structure of elements.
+RWStructuredBuffer<Voxel> Voxels;
+RWStructuredBuffer<Voxel> VoxelsTemp;
+
+uint size;
+
+float4 origin;
+float4 rotation;
+float4 inverseRotation;
+
+uint calcIndex (uint3 id)
+{
+    return id.x + (id.y * size) + (id.z * size * size);
+}
+
+ float4 hamilton(float4 a, float4 b)
+{
+    // https://en.wikipedia.org/wiki/Quaternion#Hamilton_product
+    float w = (a.w * b.w) - (a.x * b.x) - (a.y * b.y) - (a.z * b.z);
+    float x = (a.w * b.x) + (a.x * b.w) + (a.y * b.z) - (a.z * b.y);
+    float y = (a.w * b.y) - (a.x * b.z) + (a.y * b.w) + (a.z * b.x);
+    float z = (a.w * b.z) + (a.x * b.y) - (a.y * b.x) + (a.z * b.w);
+
+    return float4(x, y, z, w);
+}
+
+// KERNELS:
+
+// Clears the voxels.
+[numthreads(8,8,8)]
+void Clear (uint3 id : SV_DispatchThreadID)
+{
+    const uint index = calcIndex(id);
+    Voxel e = Voxels[index];
+    e.type = 0;
+    Voxels[index] = e;
+}
+
+// Copies the reference voxels to voxels. Requires equal size voxel buffers.
+[numthreads(8,8,8)]
+void Copy (uint3 id : SV_DispatchThreadID)
+{
+    const uint index = calcIndex(id);
+    Voxels[index] = VoxelsTemp[index];
+}
+
+// Voxel rotation about the origin offset.
+[numthreads(8,8,8)]
+void Rotate (uint3 id : SV_DispatchThreadID)
+{
+    const float4 pointVector = float4(id.x - origin.x, id.y - origin.y, id.z - origin.z, 0);
+    const float4 rotatedVector = hamilton(hamilton(rotation, pointVector), inverseRotation);
+    const uint3 checkPoint = uint3(rotatedVector.x + origin.x, rotatedVector.y + origin.y, rotatedVector.z + origin.z);
+
+    if (checkPoint.x >= 0 && checkPoint.x < size &&
+        checkPoint.y >= 0 && checkPoint.y < size &&
+        checkPoint.z >= 0 && checkPoint.z < size) 
+    {
+        Voxel e = Voxels[calcIndex(checkPoint)];
+        const uint index = calcIndex(id);
+        Voxel eNew;
+        eNew.type = e.type;
+        VoxelsTemp[index] = eNew;
+    } else {
+        const uint index = calcIndex(id);
+        Voxel eNew;
+        eNew.type = 0;
+        VoxelsTemp[index] = eNew;
+    }
+}

@@ -1,0 +1,166 @@
+#pragma kernel Add
+#pragma kernel Subtract
+#pragma kernel Intersect
+#pragma kernel Fill
+#pragma kernel Multiply
+
+// Represents the properties of a single point in the voxel structure.
+struct Voxel
+{
+    uint type;
+};
+
+// Two input buffer which represents a 3d voxel data structure of elements.
+RWStructuredBuffer<Voxel> VoxelsA;
+RWStructuredBuffer<Voxel> VoxelsB;
+RWStructuredBuffer<Voxel> VoxelsTemp;
+uint sizeA;
+uint sizeB;
+float4 offset;
+
+// A selection of points that can form a line, or any number of different possible shapes or sparse data points.
+// Used in voxel products and are intended to be smaller and more computationally optimal than multiplying two
+// Voxel data structures(which at size 128 it ~2mil ops per Voxel!).
+// Points are centered about an origin. So a line of length 128 within a bounds of 128 will have points from -64 to 64.
+RWStructuredBuffer<float4> Points;
+uint pointsSize;
+
+uint calcIndex (uint3 id, int size)
+{
+    return id.x + (id.y * size) + (id.z * size * size);
+}
+
+[numthreads(8,8,8)]
+void Add (uint3 id : SV_DispatchThreadID)
+{
+    uint3 idB = id - (uint3)offset;
+
+    if (idB.x >= 0 && idB.x < sizeB &&
+        idB.y >= 0 && idB.y < sizeB &&
+        idB.z >= 0 && idB.z < sizeB) 
+    {
+        const uint indexB = calcIndex(id, sizeB);
+        Voxel voxelB = VoxelsB[indexB];
+
+        if (voxelB.type != 0)
+        {
+            // Set the voxel from B.
+            const uint indexA = calcIndex(id, sizeA);
+            VoxelsA[indexA] = voxelB;
+        }
+    }
+}
+
+[numthreads(8,8,8)]
+void Subtract (uint3 id : SV_DispatchThreadID)
+{
+    uint3 idB = id - (uint3)offset;
+
+    if (idB.x >= 0 && idB.x < sizeB &&
+        idB.y >= 0 && idB.y < sizeB &&
+        idB.z >= 0 && idB.z < sizeB) 
+    {
+        const uint indexB = calcIndex(id, sizeB);
+        Voxel voxelB = VoxelsB[indexB];
+
+        if (voxelB.type != 0)
+        {
+            // Clear out the existing voxel.
+            const uint indexA = calcIndex(id, sizeA);
+            Voxel emptyVoxel;
+            emptyVoxel.type = 0;
+            VoxelsA[indexA] = emptyVoxel;
+        }
+    }
+}
+
+[numthreads(8,8,8)]
+void Intersect (uint3 id : SV_DispatchThreadID)
+{
+    uint3 idB = id - (uint3)offset;
+
+    if (idB.x >= 0 && idB.x < sizeB &&
+        idB.y >= 0 && idB.y < sizeB &&
+        idB.z >= 0 && idB.z < sizeB) 
+    {
+        const uint indexA = calcIndex(id, sizeA);
+        Voxel voxelA = VoxelsA[indexA];
+        const uint indexB = calcIndex(id, sizeB);
+        Voxel voxelB = VoxelsB[indexB];
+
+        if (voxelB.type != 0 && voxelA.type != 0)
+        {
+            // Set voxel B into A.
+           VoxelsA[indexA] = voxelB;
+        } 
+        else 
+        {
+            // Clear out the voxel, nothing present in one or the other sets.
+            const uint indexA = calcIndex(id, sizeA);
+            Voxel emptyVoxel;
+            emptyVoxel.type = 0;
+            VoxelsA[indexA] = emptyVoxel;
+        }
+    } 
+    else 
+    {
+        // Clear out the voxel, no intersection.
+        const uint indexA = calcIndex(id, sizeA);
+        Voxel emptyVoxel;
+        emptyVoxel.type = 0;
+        VoxelsA[indexA] = emptyVoxel;
+    }
+}
+
+[numthreads(8,8,8)]
+void Fill (uint3 id : SV_DispatchThreadID)
+{
+    uint3 idB = id - (uint3)offset;
+
+    if (idB.x >= 0 && idB.x < sizeB &&
+        idB.y >= 0 && idB.y < sizeB &&
+        idB.z >= 0 && idB.z < sizeB) 
+    {
+        const uint indexA = calcIndex(id, sizeA);
+        Voxel voxelA = VoxelsA[indexA];
+        const uint indexB = calcIndex(id, sizeB);
+        Voxel voxelB = VoxelsB[indexB];
+
+        // Only set the voxel from B is one isnt present in A.
+        if (voxelB.type != 0 && voxelA.type != 0)
+        {
+            VoxelsA[indexA] = voxelB;
+        }
+    }
+}
+
+[numthreads(8,8,8)]
+void Multiply (uint3 id : SV_DispatchThreadID)
+{
+    for (uint i = 0; i < pointsSize; i++)
+    {
+        float4 pf = Points[i];
+        float4 idf = float4(id.x, id.y, id.z, 0);
+        float4 projectedPoint = idf + pf;
+        
+        // Make sure projection is within the bounds of A's voxel space.
+        if (projectedPoint.x < (float)sizeA && 
+            projectedPoint.y < (float)sizeA && 
+            projectedPoint.z < (float)sizeA &&
+            projectedPoint.x >= (float)0 &&
+            projectedPoint.y >= (float)0 &&
+            projectedPoint.z >= (float)0)
+        {
+            uint3 boundedPoint = uint3(projectedPoint.x, projectedPoint.y, projectedPoint.z);
+            // Point exists within the bounds of A.
+            Voxel voxel = VoxelsA[calcIndex(boundedPoint, sizeA)];
+            if (voxel.type != 0)
+            {
+                // Grab the first value and break the loop. 
+                // Todo: Think if this needs to be improved.
+                VoxelsTemp[calcIndex(id, sizeA)] = voxel;
+                break;
+            }
+        }
+    }
+}

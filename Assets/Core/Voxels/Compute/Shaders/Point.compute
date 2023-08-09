@@ -1,0 +1,130 @@
+﻿#pragma kernel Line
+
+// A selection of points that can form a line, or any number of different possible shapes or sparse data points.
+// Used in voxel products and are intended to be smaller and more computationally optimal than multiplying two
+// Voxel data structures(which at size 128 it ~2mil ops per Voxel!).
+// Points are centered about an origin. So a line of length 128 within a bounds of 128 will have points from -64 to 64.
+RWStructuredBuffer<float4> Points;
+uint pointsSize;
+
+uint3 startingPoint;
+uint3 endingPoint;
+
+/// For conversion only.
+/// Used when converting points to voxels.
+struct Voxel
+{
+    uint type;
+};
+RWStructuredBuffer<Voxel> Voxels;
+uint size;
+///
+///
+
+[numthreads(8,1,1)]
+void Line (uint3 id : SV_DispatchThreadID)
+{
+    /*
+
+    dx = abs(x2 - x1)
+    dy = abs(y2 - y1)
+    dz = abs(z2 - z1)
+    if (x2 > x1):
+        xs = 1
+    else:
+        xs = -1
+    if (y2 > y1):
+        ys = 1
+    else:
+        ys = -1
+    if (z2 > z1):
+        zs = 1
+    else:
+        zs = -1
+
+
+    # Driving axis is X-axis"
+    if (dx >= dy and dx >= dz):        
+        p1 = 2 * dy - dx
+        p2 = 2 * dz - dx
+        while (x1 != x2):
+            x1 += xs
+            if (p1 >= 0):
+                y1 += ys
+                p1 -= 2 * dx
+            if (p2 >= 0):
+                z1 += zs
+                p2 -= 2 * dx
+            p1 += 2 * dy
+            p2 += 2 * dz
+            ListOfPoints.append((x1, y1, z1))
+  
+    # Driving axis is Y-axis"
+    elif (dy >= dx and dy >= dz):       
+        p1 = 2 * dx - dy
+        p2 = 2 * dz - dy
+        while (y1 != y2):
+            y1 += ys
+            if (p1 >= 0):
+                x1 += xs
+                p1 -= 2 * dy
+            if (p2 >= 0):
+                z1 += zs
+                p2 -= 2 * dy
+            p1 += 2 * dx
+            p2 += 2 * dz
+            ListOfPoints.append((x1, y1, z1))
+  
+    # Driving axis is Z-axis"
+    else:        
+        p1 = 2 * dy - dz
+        p2 = 2 * dx - dz
+        while (z1 != z2):
+            z1 += zs
+            if (p1 >= 0):
+                y1 += ys
+                p1 -= 2 * dz
+            if (p2 >= 0):
+                x1 += xs
+                p2 -= 2 * dz
+            p1 += 2 * dy
+            p2 += 2 * dx
+            ListOfPoints.append((x1, y1, z1))
+    return ListOfPoints
+  
+  
+    def main():
+        (x1, y1, z1) = (-1, 1, 1)
+        (x2, y2, z2) = (5, 3, -1)
+        ListOfPoints = Bresenham3D(x1, y1, z1, x2, y2, z2)
+        print(ListOfPoints)
+
+    */
+
+    for (uint i = 0; i < pointsSize; i++)
+    {
+        float4 pf = Points[i];
+        float4 idf = float4(id.x, id.y, id.z, 0);
+        float4 projectedPoint = idf + pf;
+        
+        // Make sure projection is within the bounds of A's voxel space.
+        if (projectedPoint.x < (float)sizeA && 
+            projectedPoint.y < (float)sizeA && 
+            projectedPoint.z < (float)sizeA &&
+            projectedPoint.x >= (float)0 &&
+            projectedPoint.y >= (float)0 &&
+            projectedPoint.z >= (float)0)
+        {
+            uint3 boundedPoint = uint3(projectedPoint.x, projectedPoint.y, projectedPoint.z);
+            // Point exists within the bounds of A.
+            Voxel voxel = VoxelsA[calcIndex(boundedPoint, sizeA)];
+            if (voxel.type != 0)
+            {
+                // Grab the first value and break the loop. 
+                // Todo: Think if this needs to be improved.
+                VoxelsTemp[calcIndex(id, sizeA)] = voxel;
+                break;
+            }
+        }
+    }
+}

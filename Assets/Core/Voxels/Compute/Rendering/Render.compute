@@ -1,0 +1,133 @@
+#pragma kernel RayTraceRender
+#pragma kernel GenerateNormal
+#pragma kernel LightVar1
+
+// Represents the properties of a single point in the voxel structure.
+struct Voxel
+{
+    uint type;
+};
+
+// A buffer which represents a 3d voxel data structure of elements.
+RWStructuredBuffer<Voxel> Voxels;
+RWStructuredBuffer<float4> VoxelColors;
+
+// The target textures to render the voxel data structure to.
+RWTexture2D<float4> Albedo;
+RWTexture2D<float4> Depth;
+RWTexture2D<float4> Normal;
+
+uint voxelBufferSideLength;
+
+uint calcIndex (uint3 id)
+{
+    return id.x + (id.y * voxelBufferSideLength) + (id.z * voxelBufferSideLength * voxelBufferSideLength);
+}
+
+[numthreads(8,8,1)]
+void RayTraceRender (uint3 id : SV_DispatchThreadID)
+{
+    Albedo[id.xy] = float4(0, 0, 0, 0);
+    for(uint z = 0; z < voxelBufferSideLength; z++)
+    {
+        const uint index = calcIndex(uint3(id.x, id.y, z));
+        const uint type = Voxels[index].type;
+        if (type != 0)
+        {
+            // Determine and set color.
+            Albedo[id.xy] = VoxelColors[type];
+
+            // Calculate and set depth.
+            const float depthRatio = ((voxelBufferSideLength - (float)z) / (float)voxelBufferSideLength);
+            Depth[id.xy] = float4(depthRatio, depthRatio, depthRatio, 1);
+            break;
+        }
+    }
+}
+
+[numthreads(8,8,1)]
+void LightVar1 (uint3 id : SV_DispatchThreadID)
+{
+    const float4 color = Albedo[id.xy];
+    const float depth = Depth[id.xy].x;
+
+    // Modulate to a specific level of lighting.
+    const int depthIndex = depth * 10; // Put into 1-10 range.
+    const float flattenedDepthRatio = (float)depthIndex / 10.0;
+    Albedo[id.xy] = color * flattenedDepthRatio;
+}
+
+[numthreads(8,8,1)]
+void GenerateNormal (uint3 id : SV_DispatchThreadID)
+{
+    // Sobel Filter
+    const float s6 = Depth[uint2(id.x - 1, id.y + 1)].x;
+    const float s7 = Depth[uint2(id.x,     id.y + 1)].x;
+    const float s8 = Depth[uint2(id.x + 1, id.y + 1)].x;
+    
+    const float s3 = Depth[uint2(id.x - 1, id.y)].x;
+    const float4 s4f4 = Depth[uint2(id.x,     id.y)];
+    //const float s4 = s4f4.x;
+    const float s5 = Depth[uint2(id.x + 1, id.y)].x;
+    
+    const float s0 = Depth[uint2(id.x - 1, id.y - 1)].x;
+    const float s1 = Depth[uint2(id.x,     id.y - 1)].x;
+    const float s2 = Depth[uint2(id.x + 1, id.y - 1)].x;
+    
+    const float scale = 25.0;
+    float3 n;
+    n.x = scale * -(s2-s0+2*(s5-s3)+s8-s6); // Red
+    n.y = scale * -(s6-s0+2*(s7-s1)+s8-s2); // Green
+    n.z = 1.0; // Blue
+    n = n * 0.5 + 0.5; // Move to [0, 1] range.
+    n = normalize(n);
+
+    if (s4f4.w != 0)
+    {
+        Normal[id.xy] = float4(n.x, n.y, n.z, s4f4.w);
+    }
+}
+
+/*
+[numthreads(8,8,1)]
+void GenerateNormal (uint3 id : SV_DispatchThreadID)
+{
+    // Sobel Filter
+    const float bl = Depth[uint2(id.x - 1, id.y + 1)].x;
+    const float b = Depth[uint2(id.x,     id.y + 1)].x;
+    const float br = Depth[uint2(id.x + 1, id.y + 1)].x;
+    
+    const float l = Depth[uint2(id.x - 1, id.y)].x;
+    const float4 s4f4 = Depth[uint2(id.x,     id.y)];
+    //const float s4 = s4f4.x;
+    const float r = Depth[uint2(id.x + 1, id.y)].x;
+    
+    const float tl = Depth[uint2(id.x - 1, id.y - 1)].x;
+    const float t = Depth[uint2(id.x,     id.y - 1)].x;
+    const float tr = Depth[uint2(id.x + 1, id.y - 1)].x;
+    
+    const float scale = 16.0;
+    const float strength = scale / 16.0;
+    float3 n;
+
+    // https://en.wikipedia.org/wiki/Sobel_operator
+    //           1 0 -1 
+    //           2 0 -2
+    //           1 0 -1
+    n.x = (-tr - (2 * r) - br) + (tl + (2 * l) + bl); // Red
+
+    //            1  2  1 
+    //            0  0  0
+    //           -1 -2 -1
+    n.y = - bl - (2 * b) - br + (tl + (2 * t) + tr); // Green
+
+    n.z =  1.0 / strength; // Blue
+    n = n * 0.5 + 0.5; // Move to [0, 1] range.
+    n = normalize(n);
+
+    if (s4f4.w != 0)
+    {
+        Normal[id.xy] = float4(n.x, n.y, n.z, s4f4.w);
+    }
+}
+*/

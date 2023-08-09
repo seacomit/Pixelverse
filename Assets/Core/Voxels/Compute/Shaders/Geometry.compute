@@ -1,0 +1,124 @@
+#pragma kernel Tetrahedron
+#pragma kernel Cube
+#pragma kernel Sphere
+#pragma kernel Triangle
+
+// Represents the properties of a single point in the voxel structure.
+struct Voxel
+{
+    uint type;
+};
+
+// A buffer which represents a 3d voxel data structure of elements.
+RWStructuredBuffer<Voxel> Voxels;
+uint size;
+
+uint type;
+
+float4 offset;
+uint cubeSize;
+float radius;
+
+uint calcIndex (uint3 id)
+{
+    return id.x + (id.y * size) + (id.z * size * size);
+}
+
+bool sideCheck2D (float3 refPoint, float3 endOfLinePoint, float3 insidePoint, float3 checkPoint)
+{
+    float3 lineVector = endOfLinePoint - refPoint;
+    float3 normal = float3(lineVector.y, -1 * lineVector.x, 0);
+
+    float insideDot = dot(normal, insidePoint - refPoint);
+    float checkDot = dot(normal, checkPoint - refPoint);
+    return sign(insideDot) == sign(checkDot);
+}
+
+bool sideCheck (float3 refPoint, float3 planePoint1, float3 planePoint2, float3 insidePoint, float3 checkPoint)
+{
+    float3 normal = cross(planePoint1 - refPoint, planePoint2 - refPoint);
+    float insideDot = dot(normal, insidePoint - refPoint);
+    float checkDot = dot(normal, checkPoint - refPoint);
+    return sign(insideDot) == sign(checkDot);
+}
+
+float3 v1;
+float3 v2;
+float3 v3;
+float3 v4;
+
+[numthreads(8,8,8)]
+void Tetrahedron (uint3 id : SV_DispatchThreadID)
+{
+    const uint index = calcIndex(id);
+    const float3 checkPoint = id;
+    
+    if (sideCheck(v1, v2, v3, v4, checkPoint) &&
+        sideCheck(v2, v3, v4, v1, checkPoint) &&
+        sideCheck(v3, v4, v1, v2, checkPoint) &&
+        sideCheck(v4, v1, v2, v3, checkPoint)) 
+    {
+        Voxel e = Voxels[index];
+        e.type = type;
+        Voxels[index] = e;
+    }
+}
+
+[numthreads(8,8,8)]
+void Cube (uint3 id : SV_DispatchThreadID)
+{
+    const uint index = calcIndex(id);
+    const uint minX = offset.x;
+    const uint maxX = offset.x + cubeSize;
+    const uint minY = offset.y;
+    const uint maxY = offset.y + cubeSize;
+    const uint minZ = offset.z;
+    const uint maxZ = offset.z + cubeSize;
+    
+    if (id.x >= minX && id.x <= maxX)
+    {
+        if (id.y >= minY && id.y <= maxY)
+        {
+            if (id.z >= minZ && id.z <= maxZ)
+            {
+                Voxel e;
+                e.type = type;
+                Voxels[index] = e;
+            }
+        }
+    }
+}
+
+[numthreads(8,8,8)]
+void Sphere (uint3 id : SV_DispatchThreadID)
+{
+    const float delta = sqrt(pow(id.x - offset.x - radius, 2) + 
+                             pow(id.y - offset.y - radius, 2) + 
+                             pow(id.z - offset.z - radius, 2));
+
+    if (delta <= radius)
+    {
+        Voxel e;
+        e.type = type;
+        const uint index = calcIndex(id);
+        Voxels[index] = e;
+    }
+}
+
+[numthreads(8,8,8)]
+void Triangle (uint3 id : SV_DispatchThreadID)
+{
+    const uint index = calcIndex(id);
+    const float3 checkPoint = id;
+    const uint middle = size / 2;
+
+    if (sideCheck2D(v1, v2, v3, checkPoint) &&
+        sideCheck2D(v2, v3, v1, checkPoint) &&
+        sideCheck2D(v3, v1, v2, checkPoint) && 
+        id.z == middle) 
+    {
+        Voxel e = Voxels[index];
+        e.type = type;
+        Voxels[index] = e;
+    }
+}
